@@ -1,0 +1,10 @@
+;Pt2.3-WriteRotate.z80
+
+org 0
+
+    ld hl,1
+loop:
+    ld (hl),A
+    rlc l           ;Rotate the L register left, bit 7 goes to both bit 0 and 
+                    ;the carry flag.
+    jr loop

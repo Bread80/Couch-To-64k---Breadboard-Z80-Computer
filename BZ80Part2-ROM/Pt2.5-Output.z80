@@ -1,0 +1,7 @@
+;Pt2.5-Output.z80
+
+org 0
+
+loop:
+    out ($96),a     ;Output contents of the A register to I/O port 42
+    jr loop

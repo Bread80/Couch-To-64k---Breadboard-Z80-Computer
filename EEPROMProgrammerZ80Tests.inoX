@@ -1,0 +1,521 @@
+/*
+ * To program a 2k EEPROM chip as a 8-bit to 4x 7 segment display decoder.
+ * Based on original code by Ben Eater
+ * Updated to strip leading zeroes. 
+ * Updated to display the minus sign immediately to the left of the number.
+ */
+
+#define SHIFT_DATA 2
+#define SHIFT_CLK 3
+#define SHIFT_LATCH 4
+#define EEPROM_D0 5
+#define EEPROM_D7 12
+#define WRITE_EN 13
+
+void setAddress(int address, bool outputEnable) {
+  shiftOut(SHIFT_DATA, SHIFT_CLK, MSBFIRST, (address >> 8) | (outputEnable ? 0x00 : 0x80));
+  shiftOut(SHIFT_DATA, SHIFT_CLK, MSBFIRST, address);
+   
+  digitalWrite(SHIFT_LATCH, LOW);
+  digitalWrite(SHIFT_LATCH, HIGH);
+  digitalWrite(SHIFT_LATCH, LOW);
+}
+
+byte readEEPROM(int address) {
+  for (int pin = EEPROM_D7;pin >= EEPROM_D0; pin -= 1) {
+    pinMode(pin, INPUT);
+  }
+
+  setAddress(address, true);
+  byte data = 0;
+  for (int pin = EEPROM_D7;pin >= EEPROM_D0; pin -= 1) {
+      data = (data << 1) + digitalRead(pin);
+    }
+
+   return(data);
+}
+
+void writeEEPROM(int address, byte data) {
+  for (int pin = EEPROM_D7;pin >= EEPROM_D0; pin -= 1) {
+    pinMode(pin, OUTPUT);
+  }
+  
+  setAddress(address, false);
+  for(int pin = EEPROM_D0; pin <= EEPROM_D7; pin++) {
+    digitalWrite(pin, data & 1);
+    data = data >> 1;
+  }
+  digitalWrite(WRITE_EN, LOW);
+  delayMicroseconds(1);
+  digitalWrite(WRITE_EN, HIGH);
+  delay(5);
+}
+
+void printContents() {
+  Serial.println("Reading EEPROM");
+  for(int base=0; base <= 2047; base += 16) {
+    byte data[16];
+    for(int offset=0; offset <= 15; offset++) {
+      data[offset] = readEEPROM(base + offset);
+    }
+
+    char buf[80];
+    sprintf(buf, "%03x:  %02x %02x %02x %02x %02x %02x %02x %02x  %02x %02x %02x %02x %02x %02x %02x %02x",
+      base, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], 
+      data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]);
+    Serial.println(buf);
+  }
+}
+
+void clearEeprom() {
+  Serial.println("Clearing EEPROM");
+  for (int address=0; address <= 2047;address++) {
+    if(address % 64 == 0) {
+      Serial.print('c');
+    }
+    writeEEPROM(address, 255);
+  }
+  Serial.println();  
+}
+
+void program7Segment() {
+//Hex digits
+//byte hexDigit[] = { 0x01, 0x4f, 0x12, 0x06, 0x4c, 0x24, 0x20, 0x0f, 0x00, 0x04, 0x08, 0x60, 0x31, 0x42, 0x30, 0x38 };
+  Serial.println("Programming");
+  //For common anode displays
+  //byte digits[] = { 0x01, 0x4f, 0x12, 0x06, 0x4c, 0x24, 0x20, 0x0f, 0x00, 0x04 };
+  //For common cathode displays
+  byte digits[] = { 0x7e, 0x30, 0x6d, 0x79, 0x33, 0x5b, 0x5f, 0x70, 0x7f, 0x7b };  
+  byte digitDash = 1;
+  byte digitBlank = 0;
+
+  //Unsigned numbers
+  //Updated to use leading blanks instead of leading zeros ( ? : operator in each call)
+  for (int number = 0; number <= 255; number++) {
+    //Units
+    writeEEPROM(number, digits[number % 10]);
+    //Tens
+    writeEEPROM(256 + number, number > 9 ? digits[(number / 10) % 10] : digitBlank );
+    //Hundreds
+    writeEEPROM(512 + number, number > 99 ? digits[(number / 100) % 10] : digitBlank );
+    //Nowt to see here
+    writeEEPROM(768 + number, digitBlank);
+
+    if (number % 16 == 0) {
+      Serial.print('u');
+    }
+  }
+
+  //Two's complement numbers
+  //Updated to use leading blanks instead of leading zeros ( ? : operator in each call)
+  //Second ? : operator dispays the leading minus sign if necessary (Sorry for ugly code!)
+  for (int number = -128; number <= 127; number++) {
+    byte digitSign = number < 0 ? digitDash : digitBlank;
+    //Units
+    writeEEPROM(byte(number) + 1024, digits[abs(number) % 10]);
+    //Tens
+    writeEEPROM(byte(number) + 1280, abs(number) > 9 ? digits[(abs(number) / 10) % 10] : digitSign);
+    //Hundreds
+    writeEEPROM(byte(number) + 1536, abs(number) > 99 ? digits[(abs(number) / 100) % 10] : abs(number) > 9 ? digitSign : digitBlank);
+    //Minus sign
+    writeEEPROM(byte(number) + 1792, abs(number) > 99 ? digitSign : digitBlank);
+
+    if (number % 16 == 0) {
+      Serial.print('s');
+    }
+  }
+  Serial.println();  
+}
+
+void programROMTestPattern() {
+  for (int a=0;a<2048;a++) {
+    int v = a % 16;
+    v = (v << 4) + (15-v);
+    writeEEPROM(a, v);
+
+    Serial.print(v);Serial.print(' ');
+    if (!(a % 32)) {
+      Serial.println();
+    }
+  }
+}
+
+void programz80test() {
+  byte bytes[] = {0xc3, 0, 0};
+  for (int addr=0; addr < 3;addr++) {
+    Serial.print(addr);
+    writeEEPROM(addr, bytes[addr]);
+  }
+}
+
+void programz80outtest() {
+  byte bytes[] = {
+    
+    0x3e,0x08, //LD A,<port number>
+//loop:    
+    0x4f,      //LD C,A
+//    0x0e,0x08,   //LD C,<port number>
+     0xed,0x79,   //OUT (C),A
+
+    0x3c,        //INC A
+    0xb7,0x08,  //OR A,0x08 - Set bit 7
+    0xc3,0x02,0x00 //JP loop
+  };
+  for (int addr=0; addr < 11;addr++) {
+    Serial.print(addr);
+    writeEEPROM(addr, bytes[addr]);
+  }    
+}
+
+void programz80outporttest() {
+  byte bytes[] = {
+    
+    0x3e,0x1, //LD A,<data value>    
+    0x0e,0x09,   //LD C,<port number>
+//loop:
+    0xed,0x79,   //OUT (C),A
+
+//    0x3c,        //INC A
+0x07, //rlca
+    0xc3,0x04,0x00 //JP loop
+  };
+  for (int addr=0; addr < 10;addr++) {
+    Serial.print(addr);
+    writeEEPROM(addr, bytes[addr]);
+  }    
+}
+
+void programz80lcdtest() {
+  const byte disable = 0x00;
+  const byte datastart = 0x05;
+  const byte datastop = 0x04;
+  const byte commstart = 0x01;
+  const byte commstop = 0x00;
+
+  const byte commport = 0x08;
+  const byte dataport = 0x09;
+
+  const byte ldan = 0x3e;
+  const byte outna = 0xd3;
+  const byte jp = 0xc3;
+   
+  byte code[] = {
+    0x21,0x00,0x01, //ld hl,0100
+    //loop:
+    0x7e, //ld a,(hl) - data
+    0x23, //inc hl
+    0xd3,dataport, //out(dataport),a
+    0x7e, //ld a,(hl) - commstart or datastart
+    0x23, //inc hl
+    0xa7, //and a,a - Test if done
+    0x28,0xfe, //jr z,-2 - Infinite loop
+    0xd3,commport, //out(commport),a
+    0x3d, //dec a - clear enable bit
+    0xd3, commport, //out(commport),a
+    0xc3,0x03,0x00}; //jp loop
+
+    byte data[] = {
+    disable, commstart,
+    0x3f, commstart,
+    0x0f, commstart,
+
+    0x80+0x03,commstart, //Position cursor
+    'H',datastart,
+    'e',datastart,
+    'l',datastart,
+    'l',datastart,
+    'o',datastart,
+    ' ',datastart,
+    'w',datastart,
+    'o',datastart,
+    'r',datastart,
+    'l',datastart,
+    'd',datastart,
+    0x80+0x44,commstart, //Position cursor
+    'f',datastart,
+    'r',datastart,
+    'o',datastart,
+    'm',datastart,
+    ' ',datastart,
+    'z',datastart,
+    '8',datastart,
+    '0',datastart,
+    0x0c,commstart, //Cursor off
+    0,0
+    };
+/*    0x4e, //ld c,(hl)
+    0x23, //inc hl
+    0x7e, //ld a,(hl)
+    0x23, //inc hl
+    0xed, 0x79, //out (c),a
+    0xc3, 0x03, 0x00}; //jp loop
+
+*//*  byte data[] = {
+    commport, disable,
+    //set 8 bit interface
+    dataport, 0x3f,commport, commstart,commport, commstop,
+//    dataport, 0xf3,commport, commstart,commport, commstop,
+    //Display on
+    dataport, 0x0f,commport, commstart,commport,commstop,
+
+    dataport,'H',commport, datastart, commport, datastop,
+    dataport,'e',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+    dataport,'w',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,'r',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'d',commport, datastart, commport, datastop,
+
+    dataport,'H',commport, datastart, commport, datastop,
+    dataport,'e',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+    dataport,'w',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,'r',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'d',commport, datastart, commport, datastop,
+
+    dataport,'H',commport, datastart, commport, datastop,
+    dataport,'e',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+    dataport,'w',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,'r',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'d',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+
+    dataport,'H',commport, datastart, commport, datastop,
+    dataport,'e',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+    dataport,'w',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,'r',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'d',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+
+    dataport,'H',commport, datastart, commport, datastop,
+    dataport,'e',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+    dataport,'w',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,'r',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'d',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+
+    dataport,'H',commport, datastart, commport, datastop,
+    dataport,'e',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+    dataport,'w',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,'r',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'d',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+
+
+    dataport,'H',commport, datastart, commport, datastop,
+    dataport,'e',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+    dataport,'w',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,'r',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'d',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+
+
+    dataport,'H',commport, datastart, commport, datastop,
+    dataport,'e',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+    dataport,'w',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,'r',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'d',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+
+
+    dataport,'H',commport, datastart, commport, datastop,
+    dataport,'e',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+    dataport,'w',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,'r',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'d',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+
+
+    dataport,'H',commport, datastart, commport, datastop,
+    dataport,'e',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+    dataport,'w',commport, datastart, commport, datastop,
+    dataport,'o',commport, datastart, commport, datastop,
+    dataport,'r',commport, datastart, commport, datastop,
+    dataport,'l',commport, datastart, commport, datastop,
+    dataport,'d',commport, datastart, commport, datastop,
+    dataport,' ',commport, datastart, commport, datastop,
+
+    0};
+/*    
+    //---------------Setup ports
+    ldan, disable, //LD A, disable
+    outna, commport, //OUT (n),A
+
+    //----------------Set 8 bit interface
+    ldan, 0x33,  //LD A,char
+    outna, dataport, //OUT(n), A
+    ldan, writecommandstart,
+    outna, commport,
+    ldan, writecommandstop,
+    outna, commport,
+    ldan, 0xff,
+    outna, dataport, //OUT(n), A
+    ldan, writecommandstart,
+    outna, commport,
+    ldan, writecommandstop,
+    outna, commport,
+    ldan, disable,
+    outna, commport,
+
+    
+    //----------------Send data byte
+    ldan, 'H',  //LD A,char
+    outna, dataport, //OUT(n), A
+    ldan, writedatastart,
+    outna, commport,
+    ldan, writedatastop,
+    outna, commport,
+    ldan, disable,
+    outna, commport,
+
+    jp, 0x04,0x00};
+*/
+   for (int addr=0; addr < 51;addr++) {
+    Serial.print(addr);
+    writeEEPROM(addr, code[addr]);
+   }
+   for (int addr=0; addr < 0x200;addr++) {
+    Serial.print(addr);
+    writeEEPROM(addr + 0x100, data[addr]);
+  }    
+}
+
+void programz80keypadtest() {
+  const byte lcdon = 0x0f;
+  const byte disable = 0x00;
+  const byte datastart = 0x05;
+  const byte datastop = 0x04;
+  const byte controlstart = 0x01;
+  const byte controlstop = 0x00;
+
+  const byte controlout = 0x08;
+  const byte dataout = 0x09;
+  const byte keypadin = 0x10;  //Keypad in port
+  byte code[] = {
+    0xaf, //xor a
+    0xd3, controlout, //out (controlout), a ;LCD signals off
+    0x3e,lcdon, //ld a, cursoron
+    0xd3, dataout, //out (dataout), a
+    0x3e,controlstart, // ld a, controlstart
+    0xd3, controlout, //out (controlout), a
+    0x3e,controlstop, // ld a, controlstop
+    0xd3, controlout, //out (controlout), a
+    //-------------------Keypad Scanning
+    //mainloop:
+    0x0e, keypadin, //ld c,keypadinport
+    0x3e, 0x88, //ld a,0x88  ;Scan line
+    //scanloop:
+    0x07, //rlca ;Next row
+    0xd3, dataout, //out (dataout),a
+    0xed, 0x58, //in e,(c) ; Read keypad
+    0x57, //ld d,a
+    0x7b, 0xf0, //ld a,0xf0 ; Test for a char (non-zero output)
+    0xa3, //and a,e 
+    0x7a, //ld a,d
+    0xca, 19,00, //jp z,scanloop
+
+    //-------------------Output char in E register
+    0x7b, //ld a,e
+    0xd3, dataout, //out (dataout),a
+    0x3e, datastart, //ld a,datastart
+    0xd3, controlout, //out (controlout), a
+    0x3e, datastop, //ld a,datastop
+    0xd3, controlout, //out (controlout), a
+    0xc3, 15, 00, //jp mainloop:
+  };
+
+  for (int addr = 0;addr < 100; addr++) {
+    writeEEPROM(addr, code[addr]);
+  } 
+}
+
+void setup() {
+  // put your setup code here, to run once:
+  pinMode(SHIFT_DATA, OUTPUT);
+  pinMode(SHIFT_CLK, OUTPUT);
+  pinMode(SHIFT_LATCH, OUTPUT);
+
+  digitalWrite(WRITE_EN, HIGH);
+  pinMode(WRITE_EN, OUTPUT);
+  
+  Serial.begin(57600);
+
+//  clearEeprom();
+
+//  program7Segment();
+
+//  programROMTestPattern();
+
+//  programz80test();
+//  programz80outtest();
+//  programz80outporttest();
+//  programz80lcdtest();
+  programz80keypadtest();
+  
+  printContents();
+}
+
+void loop() {
+  pinMode(13, OUTPUT);
+
+  digitalWrite(13,HIGH);
+  delay(100);
+  digitalWrite(13, LOW);
+  delay(100);
+  // put your main code here, to run repeatedly:
+}

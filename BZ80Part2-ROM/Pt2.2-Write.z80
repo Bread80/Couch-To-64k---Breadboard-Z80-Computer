@@ -1,0 +1,9 @@
+;Pt2.2-Write.z80
+
+org 0
+
+    ld hl,42        ;Load 42 into the HL register pair
+loop:
+    ld (hl),A       ;Load contents of the A register into the memory address 
+                    ;pointed to by HL
+    jr loop

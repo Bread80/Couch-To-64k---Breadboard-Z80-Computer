@@ -1,0 +1,7 @@
+;Pt2.4-Input.z80
+
+org 0
+
+loop:
+    in a,(255)       ;Read data from I/O port 42 into the A register.
+    jr loop
