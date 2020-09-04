@@ -1,0 +1,31 @@
+;Pt3.1LCD.z80
+
+;Constants
+lcd_command equ $00 ;LCD command I/O port
+lcd_data equ $01    ;LCD data I/O port
+    
+org 0
+    ld a,$3f        ;Function set: 8-bit interface, 2-line, small font
+    out (lcd_command),a
+    ld a,$0f        ;Display on, cursor on
+    out (lcd_command),a     ;(I find turning the cursor on is very helpful when debugging)
+    ld a,$01        ;Clear display
+    out (lcd_command),a
+    ld a,$06        ;Entry mode: left to right, no shift
+    out (lcd_command),a
+                
+    ld hl,message   ;Message address
+message_loop:       ;Loop back here for next character
+    ld a,(hl)       ;Load character into A
+    and a           ;Test for end of string (A=0)
+    jr z,done
+
+    out (lcd_data),a     ;Output the character
+    inc hl          ;Point to next character (INC=increment, or add 1, to HL)
+    jr message_loop ;Loop back for next character
+
+done:
+    halt            ;Halt the processor
+
+message:
+    db ">HELLO< >DOCTOR< >NAME< >CONTINUE< >YESTERDAY< >TOMORROW<",0
