@@ -1,0 +1,54 @@
+;Pt4.1LCDFast.z80
+;Writing to the LCD with loops to wait while the LCD is busy
+
+;Constants
+lcd_command equ $00     ;LCD command I/O port
+lcd_data equ $01        ;LCD data I/O port
+    
+org 0
+    ld hl,commands      ;Address of command list, $ff terminated
+    
+command_loop:
+lcd_wait_loop1:         ;Loop back here if LCD is busy
+    in a,(lcd_command)  ;Read the status into A
+    rlca                ;Rotate A left, bit 7 moves into the carry flag
+    jr c,lcd_wait_loop1 ;Loop back if the carry flag is set
+
+    ld a,(hl)           ;Next command
+    inc a               ;Add 1 so we can test for $ff...
+    jr z,command_end    ;...by testing for zero
+    dec a               ;Restore the actual value
+    out (lcd_command),a ;Output it.
+    
+    inc hl              ;Next command
+    jr command_loop     ;Repeat
+
+command_end:                
+    ld hl,message       ;Message address (ASCIIZ)
+message_loop:           ;Loop back here for next character
+lcd_wait_loop2:         ;Loop back here if LCD is busy
+    in a,(lcd_command)  ;Read the status into A
+    rlca                ;Rotate A left, bit 7 moves into the carry flag
+    jr c,lcd_wait_loop2 ;Loop back if the carry flag is set
+
+    ld a,(hl)           ;Load character into A
+    and a               ;Test for end of string (A=0)
+    jr z,done
+
+    out (lcd_data),a    ;Output the character
+    inc hl              ;Point to next character (INC=increment, or add 1, to HL)
+    jr message_loop     ;Loop back for next character
+
+done:
+    halt                ;Halt the processor
+
+;Startup command sequence:
+;$3f: Function set: 8-bit interface, 2-line, small font
+;$0f: Display on, cursor on (I find turning the cursor on is very helpful when debugging)
+;$01: Clear display
+;$06: Entry mode: left to right, no shift
+commands:               ;$ff terminated
+    db $3f,$0f,$01,$06,$ff
+    
+message:
+    db ">HELLO< >DOCTOR< >NAME< >CONTINUE< >YESTERDAY< >TOMORROW<",0

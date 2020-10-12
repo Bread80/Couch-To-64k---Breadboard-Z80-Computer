@@ -1,0 +1,145 @@
+;Pt4.5RC2014Keyboard.z80
+;Example code for scanning the RC2014 (and similar) keyboard.
+
+;Constants
+lcd_command equ $00     ;LCD command I/O port
+lcd_data equ $01        ;LCD data I/O port
+keyboard_port equ $20   ;Keyboard in and out port
+    
+org 0
+
+;---------LCD Initialisation
+    ld hl,commands      ;Address of command list, $ff terminated
+    
+command_loop:
+lcd_wait_loop1:         ;Loop back here if LCD is busy
+    in a,(lcd_command)  ;Read the status into A
+    rlca                ;Rotate A left, bit 7 moves into the carry flag
+    jr c,lcd_wait_loop1 ;Loop back if the carry flag is set
+
+    ld a,(hl)           ;Next command
+    inc a               ;Add 1 so we can test for $ff...
+    jr z,command_end    ;...by testing for zero
+    dec a               ;Restore the actual value
+    out (lcd_command),a ;Output it.
+    
+    inc hl              ;Next command
+    jr command_loop     ;Repeat
+
+command_end:       
+;--------Welcome Message         
+    ld hl,message       ;Message address (ASCIIZ)
+message_loop:           ;Loop back here for next character
+lcd_wait_loop2:         ;Loop back here if LCD is busy
+    in a,(lcd_command)  ;Read the status into A
+    rlca                ;Rotate A left, bit 7 moves into the carry flag
+    jr c,lcd_wait_loop2 ;Loop back if the carry flag is set
+
+    ld a,(hl)           ;Load character into A
+    and a               ;Test for end of string (A=0)
+    jr z,init_done
+
+    out (lcd_data),a    ;Output the character
+    inc hl              ;Point to next character (INC=increment, or add 1, to HL)
+    jr message_loop     ;Loop back for next character
+
+init_done:
+lcd_wait_loop2b:         ;Loop back here if LCD is busy
+    in a,(lcd_command)  ;Read the status into A
+    rlca                ;Rotate A left, bit 7 moves into the carry flag
+    jr c,lcd_wait_loop2b ;Loop back if the carry flag is set
+
+    ld b,$80+$40        ;Position cursor command
+    ld c,lcd_command    ;LCD command port
+    out (c),b           ;Position LCD cursor
+
+
+keyboard_scan:
+    ld c,keyboard_port  ;Port address
+    ld a,1              ;Row to scan
+    ld d,0              ;Row index
+keyboard_loop:          ;Loop for each row
+    out (c),a           ;Output row
+    in e,(c)            ;Read columns
+    jr nz,key_found     ;If non-zero then a key is being pressed
+    
+    inc d               ;Next index
+    rlca                ;Next row
+    jr nc,keyboard_loop ;Loop until the bit falls out
+
+                        ;End of scan loop - nothing pressed
+    jr keyboard_scan    ;Loop infinitely (because this is a test)
+
+key_found:              ;We found a pressed key
+                        ;Print row index (decimal) and column (binary)
+    ;A=Row bit
+    ;D=Row index
+    ;E=Returned column
+    xor a               ;A=0 (index counter)
+column_index_loop:
+    rr e                ;Rotate E right until we find the bit which is set
+    jr c,column_index_done
+    inc a               ;Otherwise, inc index and loop again
+    jr column_index_loop
+    
+column_index_done:
+    ;A=Column index
+    ;D=Row index
+    ;Calculate key number (index into look up table)
+    ld e,a
+    ld a,d
+    add a,a             ;Shift column left 3 bits
+    add a,a
+    add a,a
+    add a,e             ;Add on row
+
+    ;A=Lookup table index
+    ;Lookup character in lookup table
+    ld hl,keypad_lut
+    ld c,a
+    ld b,0
+    add hl,bc
+    ld l,(hl)           ;Key in L, saved for later
+
+    
+lcd_wait_loop7:         ;LCD busy wait
+    in a,(lcd_command)
+    rlca
+    jr c,lcd_wait_loop7
+
+    ld c,lcd_data       ;LCD command port
+    out (c),l           ;Position LCD cursor
+
+
+    ld bc,$0000         ;Delay loop - prevent multiple keypresses
+sleep_loop:
+    dec c
+    jr nz,sleep_loop
+    dec b
+    jr nz,sleep_loop
+
+    jr keyboard_scan    ;Loop infinitely
+    
+    
+;Startup command sequence:
+;$3f: Function set: 8-bit interface, 2-line, small font
+;$0f: Display on, cursor on (I find turning the cursor on is very helpful when debugging)
+;$01: Clear display
+;$06: Entry mode: left to right, no shift
+commands:               ;$ff terminated
+    db $3f,$0f,$01,$06,$ff
+    
+message:
+    db "Press a key",0
+
+;Keyboard lookup table with one line per row. Numeric entries are for function keys.
+keypad_lut:
+    db "bhy65tgv"
+    db "nju74rfc"
+    db "mki83edx"
+    db $fe,"lo92wsz"
+    db " ",13,"p01qa",$ff
+
+
+
+
