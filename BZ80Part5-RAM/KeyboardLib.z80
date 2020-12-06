@@ -1,0 +1,202 @@
+;***CURRENTLY UNTESTED In It's Current Form***
+;Example code for scanning the RC2014 (and similar) keyboard
+;
+;Designed for the Couch To 64k Project
+
+;Constants
+;NOTE: Primary port addresses increase by $20 for each port.
+
+lcd_command equ $00     ;LCD command I/O port
+lcd_data equ $01        ;LCD data I/O port
+key_port equ $20        ;Keyboard in and out port
+rom_enable_port equ $40 ;Write a zero to enable ROM, one to disable ROM
+rom_write_enable_port equ $60
+                        ;Write a one to enable writing to EEPROM,
+                        ;zero to disable. ALWAYS disable after use!
+    
+org 0
+    ld sp,0             ;Initialise stack pointer
+    
+    call lcd_initialise ;Setup LCD display
+    
+    ;ld a,'a'
+    ;call lcd_send_data
+    
+    ld hl,welcome_message
+    call lcd_send_asciiz
+    
+    halt
+    
+welcome_message:
+    db "Couch To 64k",0
+    
+;==================Character LCD Display Library
+
+;----Send a data byte to the LCD
+;In: Data in A
+;Out: All registers preserved
+lcd_send_data:
+    push af             ;Preserve A
+lcd_send_data_loop:     ;Loop while busy
+    in a,(lcd_command)  ;Read status data
+    rlca                ;Bit 7=1 if busy
+    jr c,lcd_send_data_loop
+    
+    pop af              ;Retrieve A
+    out (lcd_data),a    ;Output it
+    ret
+
+;-----Send a command byte to the LCD
+;In: Data in A
+;Out: All registers preserved
+lcd_send_command:
+    push af             ;Preserve A
+lcd_send_command_loop:     ;Loop while busy
+    in a,(lcd_command)  ;Read status data
+    rlca                ;Bit 7=1 if busy
+    jr c,lcd_send_command_loop
+    
+    pop af              ;Retrieve A
+    out (lcd_command),a    ;Output it
+    ret
+
+;-----Send a list of commands to the LCD display ($ff terminated)
+;In: HL=Pointer to command list
+;Out: AF,HL corrupt. All other registers preserved
+lcd_send_command_list:
+    ld a,(hl)           ;Load command
+    cp $ff               ;Test if it's $ff...
+    ret z               ;...and exit if it is
+    call lcd_send_command   ;Send it to the LCD
+    inc hl              ;Advance to next byte
+    jr lcd_send_command_list    ;Loop
+
+;-----Send an ASCIIZ string to the LCD
+;In: HL=Pointer to the first byte of the string
+;Out: AF corrupt, HL. All other registers preserved
+lcd_send_asciiz:
+    
+lcd_send_asciiz_loop:
+    ld a,(hl)           ;Load command
+    and a               ;Test if it's zero...
+    jr z,lcd_send_asciiz_done  
+                        ;...and exit if it is
+    call lcd_send_data  ;Send it to the LCD
+    inc hl              ;Advance to next byte
+    jr lcd_send_asciiz  ;Loop
+    
+lcd_send_asciiz_done:
+    ret
+    
+;---------LCD Initialisation
+;In: None
+;Out: AF,HL corrupt
+lcd_initialise:
+    ld hl,lcd_init_commands     ;Address of command list, $ff terminated
+    jp lcd_send_command_list    ;Send the command list to the display
+                        ;(and return)
+
+lcd_init_commands:
+    ;db $3f,$0f,$01,$06,$ff ;Version which turns cursor on
+    db $3f,$01,$06,$ff  ;Alt version without cursor on
+    
+;-----Clear the LCD display
+;In: None
+;Out: A corrupt
+lcd_cls:
+    ld a,$01            ;Clear screen command
+    jp lcd_send_command ;Send and return
+    
+;-----Set the X,Y position of the LCD cursor
+;NOTE: This code only works on one or two line displays
+;In: D=X position (0-max), Y=Y position (0-1)
+;Out: AF,DE corrupt
+
+lcd_chars_per_line equ 40   ;Constant: number of characters per LCD line
+
+lcd_gotoxy:
+    ld a,$80    ;Set cursor position command
+    or d      ;Add on the X position
+    dec e       ;Do we want line 0 or line 1
+    jr nc,lcd_gotoxy_done       ;Line 0 = no addition, else...
+    add a,lcd_chars_per_line    ;...add line length to get to next line
+
+lcd_gotoxy_done:
+    jp lcd_send_command ;Send command and return
+    
+;===========================LCD Library END
+
+
+;===========================Keyboard reading library
+;Version for RC2015 keyboard (and compatibles)
+;In: None
+;Out: If key pressed: Carry set, A=ASCII key value
+;       else: Carry clear
+;     All other registers preserved
+key_scan:
+    push bc             ;Preserve
+    push de
+    
+    ld c,key_port       ;Port address
+    ld a,1              ;Row to scan
+    ld d,0              ;Row index
+key_loop:               ;Loop for each row
+    out (c),a           ;Output row
+    in e,(c)            ;Read columns
+    jr nz,key_found     ;If non-zero then a key is being pressed
+    
+    inc d               ;Next index
+    rlca                ;Next row
+    jr nc,key_loop      ;Loop until the bit falls out
+
+    pop de
+    pop bc              ;Retrieve
+    ret                 ;End of scan loop - nothing pressed
+
+key_found:              ;We found a pressed key
+                        ;Print row index (decimal) and column (binary)
+    ;A=Row bit
+    ;D=Row index
+    ;E=Returned column
+    xor a               ;A=0 (index counter)
+key_column_index_loop:
+    rr e                ;Rotate E right until we find the bit which is set
+    jr c,key_column_index_done
+    inc a               ;Otherwise, inc index and loop again
+    jr key_column_index_loop
+    
+key_column_index_done:
+    ;A=Column index
+    ;D=Row index
+    ;Calculate key number (index into look up table)
+    ld e,a
+    ld a,d
+    add a,a             ;Shift column left 3 bits
+    add a,a
+    add a,a
+    
+    add a,e             ;Add on row
+
+    ;A=Lookup table index
+    ;Lookup character in lookup table
+    ex hl,de            ;Preserve HL (DE already saved)
+    ld hl,keypad_lut    ;HL=table
+    ld c,a              ;BC=offset
+    ld b,0
+    add hl,bc           ;Value at HL+BC
+    ld a,(hl)           ;Key in A
+    scf                 ;Set carry flag
+    ex hl,de            ;Retrieve HL
+    pop de              ;Retrieve other preserved registers
+    pop bc
+    ret
+
+;Keyboard lookup table with one line per row. Numeric entries are for function keys.
+keypad_lut:
+    db "bhy65tgv"
+    db "nju74rfc"
+    db "mki83edx"
+    db $fe,"lo92wsz"
+    db " ",13,"p01qa",$ff
+
+;================Key scan END

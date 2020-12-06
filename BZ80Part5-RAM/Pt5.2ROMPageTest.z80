@@ -1,0 +1,150 @@
+;Pt4.5RC2014Keyboard.z80
+;Example code for scanning the RC2014 (and similar) keyboards.
+
+;Constants
+;NOTE: Primary port addresses increase by $20 for each port.
+
+lcd_command equ $00     ;LCD command I/O port
+lcd_data equ $01        ;LCD data I/O port
+key_port equ $20        ;Keyboard in and out port
+rom_disable_port equ $40 ;Write a zero to enable ROM, one to disable ROM
+    
+org 0
+    ld sp,0             ;Initialise stack pointer
+    
+    call lcd_initialise ;Setup LCD display
+    
+    ld hl,welcome_message
+    call lcd_send_asciiz
+    
+    call rom_ram_test
+
+main_loop:    
+    call key_scan       ;Fetch a key
+    jr nc,main_loop
+    
+    call lcd_send_data
+    
+    ld bc,$0000         ;Delay loop - prevent multiple keypresses
+sleep_loop:
+    dec c
+    jr nz,sleep_loop
+    dec b
+    jr nz,sleep_loop
+    
+    jr main_loop
+    
+welcome_message:
+    db "Memory Bank Test",0
+
+;RAM test code
+;Does each 16K bank contain ROM or RAM?
+;Does the ROM paging hardware work correctly?
+;=============
+ram_test_byte_dest equ $8000
+
+rom_ram_test:
+    ld de,$0001         ;Position cursor on line 2
+    call lcd_gotoxy
+    
+    ld hl,ram_test_byte ;Code to be moved
+    ld de,ram_test_byte_dest ;Destination address
+    ld bc,ram_test_byte_end - ram_test_byte
+                        ;Length of code
+    ldir                ;Copy
+    
+    ld a,0              ;Enable ROM
+    call ram_test       ;Test
+    
+    ld a,1              ;Disable ROM
+    call ram_test       ;Test
+    
+    ret
+
+;Test each memory bank to see where we have valid RAM
+;Reports a 16Kb memory bank index and P(ass) or (F)ail for each 16K bank.
+
+ram_test:
+    ld hl,$1000         ;Initial test address
+    push af             ;A=ROM bank setting
+    
+ram_test_loop:
+                        ;Output RAM bank index (bits 15,14 of HL as ASCII digit)
+    ld a,h              ;Move bits 7,6 of H to bits 1,0 of A
+    rlca
+    rlca
+    and %00000011       ;Mask out unwanted bits
+    add a,'0'           ;Convert to an ASCII digit
+    call lcd_send_data
+
+    pop af              ;Retrieve ROM bank setting
+    push af
+    call ram_test_byte_dest
+                        ;Test. Code has been moved into RAM, use correct address
+   
+    push hl             ;Preserve test address
+    
+    ld hl,ram_test_pass_msg ;Choose the appropriate message
+    jr c,ram_test_output    ;Jump on the result of the ram_test_byte_dest call
+    
+    ld hl,ram_test_fail_msg
+ram_test_output:
+    call lcd_send_asciiz    ;Output result message
+    
+    pop hl              ;Retrieve address
+    ld a,h
+    add a,$40           ;Next bank
+    ld h,a
+    jr nc,ram_test_loop ;Loop
+    
+    pop af              ;Remove ROM bank
+    ret       
+    
+ram_test_pass_msg:
+    db "P",0
+ram_test_fail_msg:
+    db "F",0
+    
+;Test if the memory at the byte pointed to by HL is working RAM
+;In: A=Value for rom_disable_port, HL=Memory address
+;Out: Carry set if passed, Carry clear if failed.
+;   AF corrupt. All other registers preserved
+ram_test_byte: 
+    out (rom_disable_port),a
+    
+    ld a,(hl)           ;Preserve old memory data
+    push af
+    
+    xor a               ;A=0
+ram_test_byte_loop:
+    ld (hl),a           ;Write data
+    cp (hl)             ;Read it back and compare
+    jr nz,ram_test_fail ;Different = fail
+    dec a               ;Else, next test value and loop
+    jr nz,ram_test_byte_loop
+    
+    ;RAM test passed
+    pop af              ;Put the original data back
+    ld (hl),a
+    xor a               ;Turn ROM back on
+    out (rom_disable_port),a
+    scf                 ;Set carry
+    ret
+    
+ram_test_fail
+    pop af              ;Put the original data back (probably needless!)
+    ld (hl),a
+    xor a               ;Turn ROM back on
+    out (rom_disable_port),a
+    and a               ;Clear carry
+    ret
+    
+ram_test_byte_end equ $ ;Get current code address
+    
+;Libraries
+;---------
+
+include "CharLCDLib.z80"
+
+include "KeypadLib.z80"
+

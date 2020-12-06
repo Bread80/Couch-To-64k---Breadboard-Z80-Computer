@@ -25,7 +25,7 @@ F 3 "www.zilog.com/manage_directlink.php?filepath=docs/z80/um0080" H 2650 5800 5
 	1    0    0    -1  
 $EndComp
 $Comp
-L MCU_Module:Arduino_Nano_v3.x A1
+L BreadboardZ80Part2-rescue:Arduino_Nano_v3.x-MCU_Module A1
 U 1 1 5F184FEE
 P 2600 2150
 F 0 "A1" H 2800 1150 50  0000 C CNN

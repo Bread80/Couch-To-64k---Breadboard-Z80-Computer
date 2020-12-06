@@ -1,0 +1,49 @@
+;Pt5.1Echo.z80
+;Hello world and echo test using LCD and Keyboard libraries
+
+;Constants
+;NOTE: Primary port addresses increase by $20 for each port.
+
+lcd_command equ $00     ;LCD command I/O port
+lcd_data equ $01        ;LCD data I/O port
+key_port equ $20        ;Keyboard in and out port
+   
+org 0
+    ld sp,0             ;Initialise stack pointer
+    
+    call lcd_initialise ;Setup LCD display
+    
+    ld hl,welcome_message   ;Display welcome message
+    call lcd_send_asciiz
+    
+    ld de,$0001         ;Position cursor on second line
+    call lcd_gotoxy
+    
+    call lcd_cursor_on  ;Turn the cursor on
+
+main_loop:    
+    call key_scan       ;Fetch a key
+    jr nc,main_loop
+    
+    call lcd_send_data
+    
+    ld bc,$0000         ;Delay loop - prevent multiple keypresses
+sleep_loop:
+    dec c
+    jr nz,sleep_loop
+    dec b
+    jr nz,sleep_loop
+    
+    jr main_loop
+
+    
+welcome_message:
+    db "Couch To 64k",0
+
+;Libraries
+;---------
+    
+include "CharLCDLib.z80"
+
+include "KeypadLib.z80"
+

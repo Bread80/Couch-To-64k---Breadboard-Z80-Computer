@@ -1,0 +1,76 @@
+;===========================Keyboard reading library
+;Version for RC2014 keyboard (and compatibles)
+;In: None
+;Out: If key pressed: Carry set, A=ASCII key value
+;       else: Carry clear
+;     All other registers preserved
+key_scan:
+    push bc             ;Preserve
+    push de
+    
+    ld c,key_port  ;Port address
+    ld a,1              ;Row to scan
+    ld d,0              ;Row index
+key_loop:               ;Loop for each row
+    out (c),a           ;Output row
+    in e,(c)            ;Read columns
+    jr nz,key_found     ;If non-zero then a key is being pressed
+    
+    inc d               ;Next index
+    rlca                ;Next row
+    jr nc,key_loop      ;Loop until the bit falls out
+
+                        ;End of scan loop - nothing pressed
+    pop de              ;Retrieve saved values
+    pop bc
+    and a               ;Clear carry flag
+    ret                 ;(Carry already cleared)
+
+key_found:              ;We found a pressed key
+                        ;Print row index (decimal) and column (binary)
+    ;A=Row bit
+    ;D=Row index
+    ;E=Returned column
+    xor a               ;A=0 (index counter)
+key_column_index_loop:
+    rr e                ;Rotate E right until we find the bit which is set
+    jr c,key_column_index_done
+    inc a               ;Otherwise, inc index and loop again
+    jr key_column_index_loop
+    
+key_column_index_done:
+    ;A=Column index
+    ;D=Row index
+    ;Calculate key number (index into look up table)
+    ;We'll end up with a value, in A, 0000ccrr where cc is the column index
+    ;and rr is the row index.
+    ld e,a              ;Save column into E
+    
+    ld a,-4             ;Our keypad only uses the low 4 bits of the row
+    add a,d             ;address so we need to subtract 4 from the index.
+                        ;We do this by adding -4 to keep the code shorter.
+                        ;We could simplify this with known specific hardware.
+                        
+    add a,a             ;Shift column left 2 bits. Adding a number to itself
+    add a,a             ;is the same as a left shift but ADD A,A is faster on Z80.
+    
+    add a,e             ;Add on row. A = final key value.
+
+    ;A=Lookup table index
+    ;Lookup character in lookup table
+    ex hl,de            ;Preserve HL (DE already saved)
+    ld hl,keypad_lut    ;HL=table
+    ld c,a              ;BC=offset
+    ld b,0
+    add hl,bc           ;Value at HL+BC
+    ld a,(hl)           ;Key in A
+    scf                 ;Set carry flag
+    ex hl,de            ;Retrieve HL
+    pop de              ;Retrieve other preserved registers
+    pop bc
+    ret
+
+keypad_lut:
+    db "D#0*C987B654A321"
+
+;================Key scan END
